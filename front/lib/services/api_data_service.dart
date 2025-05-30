@@ -1,4 +1,5 @@
-import 'package:ativarduino/utils/http_client.dart';
+import 'package:timely/utils/http_client.dart';
+
 import '../modelos/cartao.dart';
 import 'data_service_interface.dart';
 

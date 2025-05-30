@@ -1,4 +1,4 @@
-name: ativarduino
+name: timely
 description: Aplicativo para leitura RFID com Arduino
 
 # Adicione esta seção de environment
