@@ -1,0 +1,22 @@
+name: ativarduino
+description: Aplicativo para leitura RFID com Arduino
+
+# Adicione esta seção de environment
+environment:
+  sdk: '>=2.19.0 <4.0.0'
+  flutter: ">=3.7.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.1.0   # Para requisições HTTP
+  intl: ^0.18.1  # Para formatação de data/hora
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
