@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
-import 'screens/home.dart';
+import 'pages/login.dart';
+import 'pages/meusApontamentos.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'RFID Arduino',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-      ),
-      home: const Home(),
       debugShowCheckedModeBanner: false,
+      initialRoute: '/login',
+      routes: {
+        '/login': (context) => Login(),
+        '/meusApontamentos': (context) => meusApontamentos(),
+      },
     );
   }
 }
