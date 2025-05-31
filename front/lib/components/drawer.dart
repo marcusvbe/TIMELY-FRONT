@@ -13,7 +13,7 @@ class MeuDrawer extends StatelessWidget {
             decoration: BoxDecoration(color: Color(0xFF006699)),
             child: Text('Menu', style: TextStyle(color: Colors.white, fontSize: 24)),
           ),
-          ListTile(
+          ListTile( 
             leading: Icon(Icons.home),
             title: Text('Home'),
             onTap: () {
@@ -21,17 +21,10 @@ class MeuDrawer extends StatelessWidget {
             },
           ),
           ListTile(
-            leading: Icon(Icons.person),
-            title: Text('Perfil'),
-            onTap: () {
-              Navigator.pushNamed(context, '/perfil');
-            },
-          ),
-          ListTile(
             leading: Icon(Icons.logout),
             title: Text('Sair'),
             onTap: () {
-              Navigator.pushNamed(context, '/login'); // ou redireciona para a tela de login
+              Navigator.pushNamed(context, '/login');
             },
           ),
         ],

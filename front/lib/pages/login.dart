@@ -69,7 +69,7 @@ class Login extends StatelessWidget {
                       ),
                       onPressed: () {
                         Navigator.pushNamed(
-                          context, '/meusApontamentos'
+                          context, '/home'
                         );
                       },
                       child: const Text('Entrar'),
