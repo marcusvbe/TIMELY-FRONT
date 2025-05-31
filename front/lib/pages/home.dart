@@ -5,6 +5,7 @@ import '../config/app_config.dart';
 import '../modelos/cartao.dart';
 import '../services/data_service_interface.dart';
 import '../services/data_service_provider.dart';
+import '../components/drawer.dart';
 
 // Enum para os tipos de filtro de tempo
 enum FiltroTempo {
@@ -158,11 +159,10 @@ class _HomeState extends State<Home> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        leading: Icon(Icons.menu),
         title: const Text('Apontamentos'),
         backgroundColor: _primaryBlue,
-        elevation: 0,
       ),
+      drawer: MeuDrawer(),
       body: Column(
         children: [
           Container(
