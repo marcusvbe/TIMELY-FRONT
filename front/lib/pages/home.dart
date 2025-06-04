@@ -6,15 +6,10 @@ import '../modelos/cartao.dart';
 import '../services/data_service_interface.dart';
 import '../services/data_service_provider.dart';
 import '../components/drawer.dart';
+import '../services/rfid_service.dart';
 
 // Enum para os tipos de filtro de tempo
-enum FiltroTempo {
-  hoje,
-  seteDias,
-  quinzeDias,
-  trintaDias,
-  todos
-}
+enum FiltroTempo { hoje, seteDias, quinzeDias, trintaDias, todos }
 
 class Home extends StatefulWidget {
   const Home({Key? key}) : super(key: key);
@@ -25,48 +20,72 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> {
   late final DataServiceInterface _dataService;
+  late final RfidService _rfidService;
   List<CartaoModel> _registros = [];
   bool _isLoading = false;
   bool _hasError = false;
+  bool _isWebSocketConnected = false;
   String _errorMessage = '';
   Timer? _timer;
-  
+
   // Filtro de tempo selecionado (padrão: todos)
   FiltroTempo _filtroSelecionado = FiltroTempo.todos;
-  
+
   final Color _primaryBlue = const Color(0xFF006699);
   final Color _lightBlue = const Color(0xFFE6F2F8);
 
   @override
   void initState() {
     super.initState();
-    
+
     _dataService = DataServiceProvider.getService(
-      useMockData: AppConfig.useMockData,
-      apiBaseUrl: AppConfig.apiBaseUrl
-    );
-    
-    _carregarDados();
-    
-    _timer = Timer.periodic(
-      Duration(seconds: AppConfig.dataRefreshInterval), 
-      (timer) => _carregarDados()
-    );
+        useMockData: AppConfig.useMockData, apiBaseUrl: AppConfig.apiBaseUrl);
+
+    _rfidService = RfidService();
+    _rfidService.connect();
+    _rfidService.onConnectionChange = (isConnected) {
+      setState(() {
+        _isWebSocketConnected = isConnected;
+      });
+    };
+
+    // Adicione após o connect() no initState
+    _rfidService.onMessage = (message) {
+      if (message.containsKey('event') && message['event'] == 'card_read') {
+        // Feedback visual
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Cartão detectado: ${message['uid']}'),
+            backgroundColor: message['status'] == 'authorized'
+                ? Colors.green
+                : Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        // Atualizar dados
+        _carregarDados();
+      }
+    };
+
+    _timer = Timer.periodic(Duration(seconds: AppConfig.dataRefreshInterval),
+        (timer) => _carregarDados());
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _rfidService.dispose();
     super.dispose();
   }
 
   Future<void> _carregarDados() async {
     if (_isLoading) return;
-    
+
     if (AppConfig.enableLogging) {
       print('Carregando dados...');
     }
-    
+
     setState(() {
       _isLoading = true;
       _hasError = false;
@@ -74,14 +93,14 @@ class _HomeState extends State<Home> {
 
     try {
       final registros = await _dataService.getUltimosRegistros();
-      
+
       if (mounted) {
         setState(() {
           _registros = registros;
           _isLoading = false;
         });
       }
-      
+
       if (AppConfig.enableLogging) {
         print('Dados carregados: ${registros.length} registros');
       }
@@ -89,7 +108,7 @@ class _HomeState extends State<Home> {
       if (AppConfig.enableLogging) {
         print('Erro ao carregar dados: $e');
       }
-      
+
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -114,7 +133,7 @@ class _HomeState extends State<Home> {
   List<CartaoModel> _getRegistrosFiltrados() {
     final agora = DateTime.now();
     late final DateTime dataLimite;
-    
+
     switch (_filtroSelecionado) {
       case FiltroTempo.hoje:
         dataLimite = DateTime(agora.year, agora.month, agora.day);
@@ -131,12 +150,12 @@ class _HomeState extends State<Home> {
       case FiltroTempo.todos:
         return _registros; // Retorna todos os registros
     }
-    
+
     final timestampLimite = dataLimite.millisecondsSinceEpoch;
-    
-    return _registros.where((registro) => 
-      registro.timestamp >= timestampLimite
-    ).toList();
+
+    return _registros
+        .where((registro) => registro.timestamp >= timestampLimite)
+        .toList();
   }
 
   // String do título do filtro
@@ -159,8 +178,20 @@ class _HomeState extends State<Home> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Apontamentos'),
+        title: const Text('Controle de Acesso'),
         backgroundColor: _primaryBlue,
+        actions: [
+          // Indicador de status WebSocket
+          _isWebSocketConnected
+              ? Icon(Icons.wifi, color: Colors.green)
+              : Icon(Icons.wifi_off, color: Colors.red),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.pushNamed(context, '/settings');
+            },
+          ),
+        ],
       ),
       drawer: MeuDrawer(),
       body: Column(
@@ -171,14 +202,11 @@ class _HomeState extends State<Home> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Meus apontamentos', 
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold, 
-                    fontSize: 18,
-                    color: _primaryBlue
-                  )
-                ),
+                Text('Controle de Acesso',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: _primaryBlue)),
                 const SizedBox(height: 12),
                 _buildFiltroSelect(),
               ],
@@ -212,7 +240,9 @@ class _HomeState extends State<Home> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {},
+        onPressed: () {
+          _mostrarDialogAutorizarCartao(context);
+        },
         backgroundColor: Colors.green,
         child: const Icon(Icons.add),
       ),
@@ -328,13 +358,14 @@ class _HomeState extends State<Home> {
               itemBuilder: (context, index) {
                 final registro = registros[index];
                 final bool isEven = index.isEven;
-                
+
                 return Container(
                   color: isEven ? Colors.white : _lightBlue,
                   child: Row(
                     children: [
                       _buildDataCell(registro.nome ?? 'Nome', flex: 1),
-                      _buildDataCell(_formatarTimestamp(registro.timestamp), flex: 1),
+                      _buildDataCell(_formatarTimestamp(registro.timestamp),
+                          flex: 1),
                       _buildDataCell('Fim', flex: 1),
                     ],
                   ),
@@ -346,7 +377,7 @@ class _HomeState extends State<Home> {
       ],
     );
   }
-  
+
   Widget _buildHeaderCell(String text, {int flex = 1}) {
     return Expanded(
       flex: flex,
@@ -375,6 +406,139 @@ class _HomeState extends State<Home> {
           textAlign: TextAlign.center,
         ),
       ),
+    );
+  }
+
+  // Método para mostrar o diálogo de autorização de cartão
+  void _mostrarDialogAutorizarCartao(BuildContext context) {
+    final TextEditingController _uidController = TextEditingController();
+    final TextEditingController _nomeController = TextEditingController();
+    bool _isProcessing = false;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text(
+                'Autorizar Novo Cartão',
+                style: TextStyle(color: _primaryBlue),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: _uidController,
+                      decoration: InputDecoration(
+                        labelText: 'UID do Cartão',
+                        hintText: 'Ex: A1B2C3D4',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: _nomeController,
+                      decoration: InputDecoration(
+                        labelText: 'Nome do Usuário',
+                        hintText: 'Ex: João Silva',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    ElevatedButton.icon(
+                      icon: Icon(Icons.contactless),
+                      label: Text('Capturar último cartão lido'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey[800],
+                      ),
+                      onPressed: () {
+                        _rfidService.getLastUid();
+                        // Adicione um timer para esperar a resposta
+                        Future.delayed(Duration(seconds: 1), () {
+                          if (_registros.isNotEmpty) {
+                            _uidController.text = _registros.last.codigo;
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content:
+                                    Text('Nenhum cartão lido recentemente'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: Text('Cancelar'),
+                ),
+                _isProcessing
+                    ? CircularProgressIndicator(
+                        strokeWidth: 3,
+                        valueColor: AlwaysStoppedAnimation<Color>(_primaryBlue),
+                      )
+                    : ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _primaryBlue,
+                        ),
+                        onPressed: () async {
+                          final uid = _uidController.text.trim();
+                          final nome = _nomeController.text.trim();
+
+                          if (uid.isEmpty || nome.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                    'Por favor, preencha o UID e o nome do usuário'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+
+                          setState(() {
+                            _isProcessing = true;
+                          });
+
+                          // Autoriza o cartão no ESP32
+                          _rfidService.authorizeCard(uid, nome);
+
+                          // Simula um atraso para feedback visual
+                          await Future.delayed(Duration(milliseconds: 800));
+
+                          setState(() {
+                            _isProcessing = false;
+                          });
+
+                          Navigator.of(context).pop();
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                  'Cartão $uid autorizado para $nome com sucesso!'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+
+                          // Atualiza a lista de registros
+                          _carregarDados();
+                        },
+                        child: Text('Autorizar'),
+                      ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }
