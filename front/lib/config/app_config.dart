@@ -6,7 +6,7 @@ class AppConfig {
   static const int apiTimeout = 10000; // 10 segundos
 
   // WebSocket URL (agora variável)
-  static String wsUrl = 'ws://192.168.137.100:8765';
+  static String wsUrl = 'ws://192.168.15.3:8765';
 
   // Outros valores existentes
   static const bool useMockData = false;
@@ -19,23 +19,31 @@ class AppConfig {
   // Configuração de persistência
   static const String _wsUrlKey = 'ws_url_key';
 
-  // Inicializar carregando configurações salvas
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
+
     final savedUrl = prefs.getString(_wsUrlKey);
     if (savedUrl != null && savedUrl.isNotEmpty) {
-      wsUrl = savedUrl;
+      // Force it to ws://
+      wsUrl = savedUrl.replaceFirst(RegExp(r'^https?://'), 'ws://');
     }
-    if (enableLogging) {
-      print('WebSocket URL: $wsUrl');
-    }
+    if (enableLogging) print('WebSocket URL: $wsUrl');
   }
 
-  // Salvar URL do WebSocket
+  // Trecho para app_config.dart
   static Future<void> updateWsUrl(String newUrl) async {
-    wsUrl = newUrl;
+    // Remover qualquer protocolo existente
+    String cleanUrl = newUrl;
+    if (cleanUrl.contains('://')) {
+      cleanUrl = cleanUrl.split('://')[1];
+    }
+
+    // Adicionar ws:// explicitamente
+    wsUrl = 'ws://' + cleanUrl;
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_wsUrlKey, newUrl);
+    await prefs.setString(_wsUrlKey, wsUrl);
+
     if (enableLogging) {
       print('WebSocket URL atualizada: $wsUrl');
     }

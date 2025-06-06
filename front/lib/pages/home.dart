@@ -1,3 +1,4 @@
+import '../services/rfid_data_service.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../utils/date_format.dart';
@@ -27,6 +28,7 @@ class _HomeState extends State<Home> {
   bool _isWebSocketConnected = false;
   String _errorMessage = '';
   Timer? _timer;
+  StreamSubscription<CartaoModel>? _novoCartaoSubscription;
 
   // Filtro de tempo selecionado (padrão: todos)
   FiltroTempo _filtroSelecionado = FiltroTempo.todos;
@@ -49,24 +51,59 @@ class _HomeState extends State<Home> {
       });
     };
 
-    // Adicione após o connect() no initState
-    _rfidService.onMessage = (message) {
-      if (message.containsKey('event') && message['event'] == 'card_read') {
-        // Feedback visual
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Cartão detectado: ${message['uid']}'),
-            backgroundColor: message['status'] == 'authorized'
-                ? Colors.green
-                : Colors.orange,
-            duration: Duration(seconds: 2),
-          ),
-        );
+    // Se estivermos usando RfidDataService, escutar o stream de novos cartões
+    if (_dataService is RfidDataService) {
+      final rfidDataService = _dataService as RfidDataService;
+      _novoCartaoSubscription = rfidDataService.onNovoCartao.listen(
+        (novoCartao) {
+          if (!mounted) return; // Verificar se widget ainda está montado
 
-        // Atualizar dados
-        _carregarDados();
-      }
-    };
+          // Feedback visual
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Cartão detectado: ${novoCartao.codigo}'),
+              backgroundColor: (novoCartao.autorizado == true)
+                  ? Colors.green
+                  : Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+
+          // Atualizar dados na UI
+          _carregarDados();
+        },
+        onError: (error) {
+          if (AppConfig.enableLogging) {
+            print('Erro no stream de novos cartões: $error');
+          }
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Erro na comunicação RFID: $error'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        },
+      );
+    } else {
+      // Para outros serviços, manter o callback original
+      _rfidService.onMessage = (message) {
+        if (message.containsKey('event') && message['event'] == 'card_read') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Cartão detectado: ${message['uid']}'),
+              backgroundColor: message['status'] == 'authorized'
+                  ? Colors.green
+                  : Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+          _carregarDados();
+        }
+      };
+    }
 
     _timer = Timer.periodic(Duration(seconds: AppConfig.dataRefreshInterval),
         (timer) => _carregarDados());
@@ -75,6 +112,7 @@ class _HomeState extends State<Home> {
   @override
   void dispose() {
     _timer?.cancel();
+    _novoCartaoSubscription?.cancel();
     _rfidService.dispose();
     super.dispose();
   }
@@ -92,7 +130,14 @@ class _HomeState extends State<Home> {
     });
 
     try {
-      final registros = await _dataService.getUltimosRegistros();
+      // Adicionar timeout
+      final registros = await _dataService.getUltimosRegistros().timeout(
+        Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException(
+              'Timeout ao carregar dados', Duration(seconds: 10));
+        },
+      );
 
       if (mounted) {
         setState(() {
@@ -104,6 +149,18 @@ class _HomeState extends State<Home> {
       if (AppConfig.enableLogging) {
         print('Dados carregados: ${registros.length} registros');
       }
+    } on TimeoutException catch (e) {
+      if (AppConfig.enableLogging) {
+        print('Timeout ao carregar dados: $e');
+      }
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+          _errorMessage = 'Timeout: Verifique a conexão com o dispositivo';
+        });
+      }
     } catch (e) {
       if (AppConfig.enableLogging) {
         print('Erro ao carregar dados: $e');
@@ -113,7 +170,7 @@ class _HomeState extends State<Home> {
         setState(() {
           _isLoading = false;
           _hasError = true;
-          _errorMessage = e.toString();
+          _errorMessage = 'Erro: ${e.toString()}';
         });
       }
     }
@@ -453,22 +510,88 @@ class _HomeState extends State<Home> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.grey[800],
                       ),
-                      onPressed: () {
-                        _rfidService.getLastUid();
-                        // Adicione um timer para esperar a resposta
-                        Future.delayed(Duration(seconds: 1), () {
-                          if (_registros.isNotEmpty) {
-                            _uidController.text = _registros.last.codigo;
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content:
-                                    Text('Nenhum cartão lido recentemente'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
+                      onPressed: () async {
+                        try {
+                          if (!_rfidService.isConnected) {
+                            throw Exception('Dispositivo RFID não conectado');
                           }
-                        });
+
+                          // Para RfidDataService, pegar o último registro da lista
+                          if (_dataService is RfidDataService) {
+                            if (_registros.isNotEmpty) {
+                              final ultimoRegistro = _registros
+                                  .first; // Já está ordenado por timestamp
+                              _uidController.text = ultimoRegistro.codigo;
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'Último cartão capturado: ${ultimoRegistro.codigo}'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            } else {
+                              throw Exception('Nenhum cartão foi lido ainda');
+                            }
+                          } else {
+                            // Para outros serviços, usar a abordagem original com listener temporário
+                            String? capturedUid;
+                            bool responseReceived = false;
+
+                            // Criar listener temporário
+                            void tempListener(Map<String, dynamic> message) {
+                              if (message.containsKey('last_uid') &&
+                                  message['last_uid'] != null) {
+                                capturedUid = message['last_uid'];
+                                responseReceived = true;
+                              }
+                            }
+
+                            // Guardar callback original e definir temporário
+                            final originalCallback = _rfidService.onMessage;
+                            _rfidService.onMessage = tempListener;
+
+                            try {
+                              // Enviar comando
+                              _rfidService.getLastUid();
+
+                              // Aguardar resposta por 3 segundos
+                              int attempts = 0;
+                              const maxAttempts = 15; // 3 segundos total
+
+                              while (
+                                  !responseReceived && attempts < maxAttempts) {
+                                await Future.delayed(
+                                    Duration(milliseconds: 200));
+                                attempts++;
+                              }
+
+                              if (capturedUid != null) {
+                                _uidController.text = capturedUid!;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content:
+                                        Text('Cartão capturado: $capturedUid'),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              } else {
+                                throw Exception(
+                                    'Timeout: Nenhum cartão encontrado');
+                              }
+                            } finally {
+                              // Sempre restaurar callback original
+                              _rfidService.onMessage = originalCallback;
+                            }
+                          }
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Erro ao capturar cartão: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
                       },
                     ),
                   ],
@@ -509,28 +632,51 @@ class _HomeState extends State<Home> {
                             _isProcessing = true;
                           });
 
-                          // Autoriza o cartão no ESP32
-                          _rfidService.authorizeCard(uid, nome);
+                          try {
+                            // Verificar se WebSocket está conectado
+                            if (!_rfidService.isConnected) {
+                              throw Exception('Dispositivo RFID não conectado');
+                            }
 
-                          // Simula um atraso para feedback visual
-                          await Future.delayed(Duration(milliseconds: 800));
+                            // Autoriza o cartão no ESP32
+                            _rfidService.authorizeCard(uid, nome);
 
-                          setState(() {
-                            _isProcessing = false;
-                          });
+                            // Aguardar um tempo para confirmação
+                            await Future.delayed(Duration(milliseconds: 800));
 
-                          Navigator.of(context).pop();
+                            setState(() {
+                              _isProcessing = false;
+                            });
 
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                  'Cartão $uid autorizado para $nome com sucesso!'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
+                            Navigator.of(context).pop();
 
-                          // Atualiza a lista de registros
-                          _carregarDados();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                    'Cartão $uid autorizado para $nome com sucesso!'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+
+                            // Atualiza a lista de registros
+                            _carregarDados();
+                          } catch (e) {
+                            setState(() {
+                              _isProcessing = false;
+                            });
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Erro ao autorizar cartão: $e'),
+                                backgroundColor: Colors.red,
+                                duration: Duration(seconds: 4),
+                              ),
+                            );
+
+                            if (AppConfig.enableLogging) {
+                              print('Erro na autorização do cartão: $e');
+                            }
+                          }
                         },
                         child: Text('Autorizar'),
                       ),

@@ -17,7 +17,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _ipController.text = AppConfig.wsUrl.replaceFirst('ws://', '');
+    _ipController.text = AppConfig.wsUrl
+        .replaceFirst('ws://', '')
+        .replaceFirst('wss://', '')
+        .replaceFirst('http://', '')
+        .replaceFirst('https://', '');
   }
 
   Future<void> _testConnection() async {
@@ -82,7 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               controller: _ipController,
               decoration: const InputDecoration(
                 labelText: 'Endereço do ESP32 (IP:Porta)',
-                hintText: 'Ex: 192.168.137.100:8765',
+                hintText: 'Ex: 192.168.15.3:8765',
                 border: OutlineInputBorder(),
               ),
             ),

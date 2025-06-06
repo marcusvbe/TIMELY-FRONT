@@ -4,14 +4,10 @@ import 'pages/home.dart';
 import 'screens/settings_screen.dart';
 import 'config/app_config.dart';
 
-void main() async {
-  // Inicializa o Flutter antes de usar plugins nativos
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Carrega configurações salvas
-  await AppConfig.init();
-
-  runApp(const MyApp());
+  await AppConfig.init(); // <-- load & normalize saved wsUrl here
+  runApp(const MyApp()); // <-- now AppConfig.wsUrl is correct
 }
 
 class MyApp extends StatelessWidget {
